@@ -1,0 +1,60 @@
+stages:          # List of stages for jobs, and their order of execution
+  - build-image
+  - test
+  - deploy
+
+variables:
+    IMAGE_REGISTRY: occupyed.jfrog.io/occupyed-docker
+
+build-job:       # This job runs in the build stage, which runs first.
+  stage: build-image
+  image: docker:dind
+  services:
+    - docker:dind
+  before_script:
+    - echo $ARTIFACTORY_PASSWORD | docker login -u $ARTIFACTORY_USER occupyed.jfrog.io  --password-stdin
+  script:
+    - docker buildx create --name mybuilder
+    - docker buildx use mybuilder
+    - docker buildx inspect --bootstrap
+    - docker buildx build --platform linux/amd64,linux/arm64 --push -t $IMAGE_REGISTRY/$CI_PROJECT_NAME:$CI_COMMIT_SHORT_SHA .
+    - docker buildx stop mybuilder
+
+unit-test-job:   # This job runs in the test stage.
+  stage: test    # It only starts when the job in the build stage completes successfully.
+  script:
+    - echo "Running unit tests... This will take about 60 seconds."
+    - sleep 60
+    - echo "Code coverage is 90%"
+
+lint-test-job:   # This job also runs in the test stage.
+  stage: test    # It can run at the same time as unit-test-job (in parallel).
+  script:
+    - echo "Linting code... This will take about 10 seconds."
+    - sleep 10
+    - echo "No lint issues found."
+
+deploy-job:      # This job runs in the deploy stage.
+  stage: deploy  # It only runs when *both* jobs in the test stage complete successfully.
+  image: occupyed/oke:latest
+  variables:
+    IMAGE: $IMAGE_REGISTRY/$CI_PROJECT_NAME:$CI_COMMIT_SHORT_SHA
+    NAMESPACE: srn
+    DEPLOYMENT: $CI_PROJECT_NAME
+  script:
+    - echo $IMAGE
+    - echo "Deploying application..."
+    - mkdir /root/.oci
+    - mkdir /root/.kube
+    - cat "$OCI_CONFIG" > /root/.oci/config
+    - cat "$OCI_KEY" > /root/.oci/anurag-key.pem
+    - oci ce cluster create-kubeconfig --cluster-id $CLUSTER_ID --file /root/.kube/config --region ap-mumbai-1 --token-version 2.0.0  --kube-endpoint PUBLIC_ENDPOINT
+    - kubectl config get-contexts
+    - kubectl get ns
+    - sed -i "s/image-tag/$CI_COMMIT_SHORT_SHA/g" deployment/deploy.yaml
+    - if kubectl get deployment $DEPLOYMENT -n $NAMESPACE; then
+        kubectl set image deployment/$DEPLOYMENT django-x=$IMAGE -n $NAMESPACE;
+      else
+        kubectl apply -f deployment/deploy.yaml -n $NAMESPACE;
+      fi
+    - echo "Application successfully deployed."

@@ -1,0 +1,21 @@
+stages:
+  - trigger-deployment
+
+trigger-deployment:
+  stage: trigger-deployment
+  image: 
+    name: artifactory-1.com/devops-docker-local/cicd-utils:latest
+  variables:
+    PIPELINE: "${CI_PROJECT_NAME}"
+    CLUSTER: "cloudsaas-dev-1"
+  rules:
+  - if: '$CI_PIPELINE_SOURCE != "web" && $CI_COMMIT_BRANCH !~ /^feature/ && $CI_COMMIT_BRANCH !~ /^hotfix/'
+    when: on_success
+  script:
+    - PUBLISH_VERSION=$(grep "version:" helmcharts/$PIPELINE/Chart.yaml | cut -d ' ' -f 2)
+    - echo "Helm version to be deployed - $PUBLISH_VERSION"
+    - spin pipeline execute --name $PIPELINE --application $APPLICATION --parameter cluster="cloudsaas-dev-1" --parameter namespace=$NAMESPACE --parameter docker_image_tag=${CI_COMMIT_SHORT_SHA} --parameter helm_version=$PUBLISH_VERSION --insecure
+    - spin pipeline execute --name $PIPELINE --application $APPLICATION --parameter cluster="cloudsaas-qa-1" --parameter namespace=$NAMESPACE --parameter docker_image_tag=${CI_COMMIT_SHORT_SHA} --parameter helm_version=$PUBLISH_VERSION --insecure
+    # - echo 'auto-deployment disabled intentianally for now.'
+  tags:
+    - hparunner

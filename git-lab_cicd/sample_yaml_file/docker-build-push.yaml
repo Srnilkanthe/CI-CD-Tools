@@ -1,0 +1,53 @@
+docker-build-push:
+  stage: docker-build-push
+  image:
+    name: artifactory-1/devops-docker-virtual/docker:20.10.16-custom
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_VERIFY: 1
+    DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
+    ARTIFACTORY_URL: "artifactory-1.com"
+    IMAGE_NAME: ${CI_PROJECT_NAME}
+    IMAGE_TAG: ${CI_COMMIT_SHORT_SHA}
+    IMAGE_PATH: ${CI_PROJECT_DIR}
+  services:
+    - docker:20.10.16-dind
+  before_script:
+  - echo $JFROG_REGISTRY_PASSWORD | docker login -u $JFROG_REGISTRY_USER $ARTIFACTORY_URL --password-stdin
+  script:
+    - Major=$(grep "Major" Release | cut -d' ' -f3)
+    - Minor=$(grep "Minor" Release | cut -d' ' -f3)
+    - Patch=$(grep "Patch" Release | cut -d' ' -f3)
+    - Build=$(grep "Build" Release | cut -d' ' -f3)
+    - IMAGE_RELEASETAG=$Major.$Minor.$Patch.$Build
+    # build docker image using Dockerfile at root and tag docker image to artifactory
+    - >
+      DOCKER_BUILDKIT=$BUILDKIT_ENABLED docker build
+      --pull
+      --cache-from $ARTIFACTORY_URL/$ARTIFACTORY_PATH/$IMAGE_NAME:latest
+      --build-arg http_proxy=$http_proxy
+      --build-arg https_proxy=$https_proxy
+      --build-arg no_proxy=$no_proxy
+      --label "org.opencontainers.image.title=$CI_PROJECT_TITLE"
+      --label "org.opencontainers.image.url=$CI_PROJECT_URL"
+      --label "org.opencontainers.image.created=$CI_JOB_STARTED_AT"
+      --label "org.opencontainers.image.revision"="$IMAGE_TAG"
+      --label "org.opencontainers.image.version"="$CI_COMMIT_REF_NAME"
+      --label "org.opencontainers.image.author"="$CI_COMMIT_AUTHOR"
+      --tag $ARTIFACTORY_URL/$ARTIFACTORY_PATH/$IMAGE_NAME:$IMAGE_TAG
+      --tag $ARTIFACTORY_URL/$ARTIFACTORY_PATH/$IMAGE_NAME:$IMAGE_RELEASETAG
+      --secret id=netrc,src=$HOME/.netrc
+      .
+    # - docker push $ARTIFACTORY_URL/$ARTIFACTORY_PATH/$IMAGE_NAME:$IMAGE_TAG
+    # push docker image to artifactory
+    - >
+      if [ "$CI_COMMIT_BRANCH" == "master" ] || [ "$CI_COMMIT_BRANCH" == "develop" ] || [[ "$CI_COMMIT_BRANCH" == feature* ]] || [[ "$CI_COMMIT_BRANCH" == release* ]] || [[ "$CI_COMMIT_BRANCH" == hotfix* ]];
+      then
+        docker push $ARTIFACTORY_URL/$ARTIFACTORY_PATH/$IMAGE_NAME:$IMAGE_TAG
+        curl -X PATCH -u $JFROG_REGISTRY_USER:$JFROG_REGISTRY_PASSWORD -H "Content-Type: application/json" "https://artifactory-1.com/artifactory/api/metadata/$ARTIFACTORY_PATH/$IMAGE_NAME/$IMAGE_TAG" -d '{"props": {"image.branch": "'"$CI_COMMIT_REF_NAME"'"}}'
+      else
+        echo "Had this been a master branch, you could have pushed it."
+      fi
+  tags:
+    - hparunner

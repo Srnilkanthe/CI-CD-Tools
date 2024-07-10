@@ -1,0 +1,28 @@
+helm-package:
+    stage: helm-package
+    image:
+      name: artifactory-1com/devops-docker-virtual/helm:helm_k8s_custom
+    variables:
+      ARTIFACTORY: "https://artifactory-1.com/artifactory/"
+      SERVICE: "${CI_PROJECT_NAME}/"
+    script:
+      - PUBLISH_VERSION=$(grep "version:" helmcharts/$SERVICE/Chart.yaml | cut -d ' ' -f 2)
+      # - CLEAN_BRANCH_NAME=$(echo "$CI_COMMIT_BRANCH" | tr -cd '[:alnum:]._-')
+      # the below command will replace the "/", " " and "_" with a  "-" and append that to the publish version
+      # this change is made in order to follow the semantic version policy. Refer AD-4411
+      - CLEAN_BRANCH_NAME=$(echo "$CI_COMMIT_BRANCH" | tr -cd '[:alnum:]/._ -' | tr '/ _' '-')
+      - >
+        if [ "$CI_COMMIT_BRANCH" == "master" ] || [ "$CI_COMMIT_BRANCH" == "develop" ] || [ "$CI_COMMIT_BRANCH" == "feature/symphony" ] || [[ "$CI_COMMIT_BRANCH" == release* ]]; then
+          echo "On branch $CI_COMMIT_BRANCH -- Leaving chart version alone";
+        else
+          echo "On branch $CI_COMMIT_BRANCH -- Adding branch name to chart version";
+          PUBLISH_VERSION="$PUBLISH_VERSION-$CLEAN_BRANCH_NAME";
+        fi;
+      - echo "Version to be used - $PUBLISH_VERSION"
+      - helm package ./helmcharts/$SERVICE --version $PUBLISH_VERSION
+      - FILE_NAME=$(ls | grep tgz)
+      - ARTIFACTORY+=${ARTIFACTORY_HELM}${SERVICE}${FILE_NAME}
+      - echo "Pushing the package $FILE_NAME to the artifactory $ARTIFACTORY"
+      - curl -udevops_ci:Test@123 -T $FILE_NAME $ARTIFACTORY
+    tags:
+      - hparunner

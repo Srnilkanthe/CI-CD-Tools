@@ -1,0 +1,36 @@
+// Run job in specific container
+
+podTemplate(containers: [
+    containerTemplate(name: 'docker', image: 'docker', command: 'cat', ttyEnabled: true),
+    containerTemplate(name: 'kubectl', image: 'lachlanevenson/k8s-kubectl', command: 'cat', ttyEnabled: true)
+]) {
+    node(POD_LABEL) {
+        stage('Build Image') {
+            container('docker') {
+                // Your build steps here
+            }
+        }
+
+        stage('Test') {
+            parallel {
+                stage('Unit Test') {
+                    steps {
+                        // Your unit test steps here
+                    }
+                }
+
+                stage('Lint Test') {
+                    steps {
+                        // Your lint test steps here
+                    }
+                }
+            }
+        }
+
+        stage('Deploy') {
+            container('kubectl') {
+                // Your deploy steps here
+            }
+        }
+    }
+}
